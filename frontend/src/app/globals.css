@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f2f6f4;
+  --color-brand-100: #e0eae4;
+  --color-brand-200: #c2d5c9;
+  --color-brand-300: #97b8a3;
+  --color-brand-400: #6a977b;
+  --color-brand-500: #4a7a5c;
+  --color-brand-600: #386146;
+  --color-brand-700: #2e4d39;
+  --color-brand-800: #263e30;
+  --color-brand-900: #1f3228;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+}
+
+/* Sticky header offset for in-page anchor targets. */
+html {
+  scroll-padding-top: 5rem;
+}
+
+body {
+  background-color: #ffffff;
+  color: var(--color-stone-900);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  /*
+   * A single keyboard-focus treatment for every interactive element, so focus
+   * is never invisible. Pointer clicks are unaffected because this only
+   * applies to :focus-visible.
+   */
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Placeholders inherit a readable, muted tone by default. */
+  ::placeholder {
+    color: var(--color-stone-400);
+  }
+}
+
+/* Respect reduced-motion preferences for the few transitions in the UI. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+

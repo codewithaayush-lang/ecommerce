@@ -1,0 +1,62 @@
+# Single repository for the whole project (frontend/ and backend/).
+# Secrets and generated files must never be committed.
+
+# --- Secrets / environment -------------------------------------------------
+# Real environment files hold the Django secret key and the database password.
+.env
+.env.*
+!.env.example
+
+# --- Python ----------------------------------------------------------------
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tox/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+# Collected static files, produced by `manage.py collectstatic`
+/backend/staticfiles/
+*.log
+
+# Test / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Node / Next.js --------------------------------------------------------
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# --- Editors and OS --------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

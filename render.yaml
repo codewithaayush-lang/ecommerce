@@ -1,0 +1,84 @@
+# Render blueprint for the e-commerce stack.
+#
+#   Browser -> Next.js (web service) -> Django (web service) -> PostgreSQL
+#
+# Create the whole stack with:  New > Blueprint > point Render at this repo.
+#
+# Secrets are NOT stored here. Set each secret in the Render dashboard, or in a
+# shared `.env` when running `render blueprint launch` locally.
+
+databases:
+  - name: ecommerce-db
+    # The smallest plan is enough for a portfolio project.
+    plan: free
+    postgresMajorVersion: "18"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Django REST API
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: ecommerce-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.lock
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    healthCheckPath: /api/health/
+    # Prevents the free instance from sleeping mid-checkout.
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.14.7"
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        # Render provides the public hostname; replace with your custom domain
+        # once it is attached. No wildcard is used, to keep Host validation strict.
+        sync: false
+      - key: DJANGO_LOG_LEVEL
+        value: "INFO"
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: ecommerce-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: ecommerce-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: ecommerce-db
+          property: password
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: ecommerce-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: ecommerce-db
+          property: port
+      - key: POSTGRES_SSLMODE
+        value: "require"
+
+  # ---------------------------------------------------------------------------
+  # Next.js frontend
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: ecommerce-web
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "26"
+      - key: NEXT_PUBLIC_API_URL
+        # Must be the API service's base URL including /api.
+        # Replace with your own API hostname after the first deploy.
+        sync: false

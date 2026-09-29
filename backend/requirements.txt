@@ -1,0 +1,16 @@
+# Direct runtime dependencies.
+#
+# Transitive dependencies are deliberately NOT listed here; pip resolves them.
+# For a byte-for-byte reproducible install, use the generated lockfile:
+#     pip install -r requirements.lock
+#
+# Regenerate requirements.lock after changing anything in this file:
+#     pip freeze > requirements.lock
+
+Django==6.1.1
+djangorestframework==3.18.1
+# psycopg 3 is required: Django 6.x dropped psycopg2 support.
+# The [binary] extra ships prebuilt wheels, so no libpq build step is needed.
+psycopg[binary]==3.3.6
+# Production WSGI server. Django's runserver is explicitly not for production.
+gunicorn==26.2.0
