@@ -1,37 +1,71 @@
-# Python virtual environments
-.venv/
-venv/
-env/
+# Ignore rules for the Django backend.
+#
+# The repository root has a .gitignore that already covers this directory.
+# This file exists so the backend is safe to use on its own, and documents the
+# rules that are specific to it.
+#
+# The most important rule here is `.env`: it holds DJANGO_SECRET_KEY and
+# POSTGRES_PASSWORD, and must never be committed.
 
-# Environment variables and secrets
+# --- Secrets / environment -------------------------------------------------
+# .env.example is the committed template and must stay tracked.
 .env
 .env.*
 !.env.example
 
-# Python bytecode and caches
+# --- Python virtual environments -------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Python bytecode and caches --------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# Django generated / collected files
-*.log
-db.sqlite3
-db.sqlite3-journal
-*.sqlite3
-/staticfiles/
-/media/
-
-# Test and coverage artifacts
-.coverage
-.coverage.*
-htmlcov/
+# Tool caches
+.mypy_cache/
+.ruff_cache/
 .pytest_cache/
 .tox/
 
-# Editors and OS files
+# Packaging artifacts
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Django ----------------------------------------------------------------
+# Collected static files, produced by `manage.py collectstatic`.
+# Never edit or commit them; they are build output.
+/staticfiles/
+/media/
+*.log
+# There is no SQLite database in this project. These patterns are a safety net
+# so a stray local file can never be committed.
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+
+# --- Node (safety net) -----------------------------------------------------
+# This is a Python project and has no Node dependencies. If a stray `npm
+# install` is ever run here, the result must still not be committed.
+node_modules/
+npm-debug.log*
+
+# --- Test and coverage artifacts -------------------------------------------
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Editors and OS --------------------------------------------------------
 .idea/
 .vscode/
 *.swp
+*.swo
 .DS_Store
+Thumbs.db
