@@ -29,7 +29,9 @@ services:
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
-        value: "3.14.7"
+        # Django 6.1 requires Python >= 3.12. Pinned to 3.13 because it is
+        # reliably available on Render; 3.14 is not offered yet.
+        value: "3.13.11"
       - key: DJANGO_DEBUG
         value: "false"
       - key: DJANGO_SECRET_KEY
@@ -77,7 +79,8 @@ services:
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
-        value: "26"
+        # Next.js 16 requires Node >= 20.9. 22 is the widely available LTS.
+        value: "22"
       - key: NEXT_PUBLIC_API_URL
         # Must be the API service's base URL including /api.
         # Replace with your own API hostname after the first deploy.
