@@ -142,6 +142,125 @@ class EnvironmentValidationTests(SimpleTestCase):
         self.assertIn("POSTGRES_PASSWORD", str(ctx.exception))
 
 
+class VercelEnvironmentTests(SimpleTestCase):
+    """The defaults that adapt when the app runs on Vercel."""
+
+    VERCEL_ENV = {
+        "VERCEL": "1",
+        "VERCEL_URL": "myapi-abc123.vercel.app",
+        "VERCEL_PROJECT_PRODUCTION_URL": "myapi.vercel.app",
+        "DJANGO_ALLOWED_HOSTS": "",
+    }
+
+    def _under_vercel(self):
+        return mock.patch.dict(os.environ, self.VERCEL_ENV, clear=False)
+
+    def test_serverless_is_detected(self):
+        with self._under_vercel():
+            self.assertTrue(env_module._detect_serverless())
+
+    def test_not_serverless_outside_vercel(self):
+        with mock.patch.dict(
+            os.environ, {"VERCEL": "", "VERCEL_URL": ""}, clear=False
+        ):
+            self.assertFalse(env_module._detect_serverless())
+
+    def test_allowed_hosts_fall_back_to_the_deployment_hostnames(self):
+        with self._under_vercel():
+            with mock.patch.object(env_module, "SERVERLESS", True):
+                hosts = env_module._resolve_allowed_hosts()
+        self.assertIn("myapi-abc123.vercel.app", hosts)
+        self.assertIn("myapi.vercel.app", hosts)
+        # Preview deployments get a new hostname on every build, so the suffix
+        # has to be allowed too.
+        self.assertIn(".vercel.app", hosts)
+
+    def test_explicit_allowed_hosts_still_win_on_vercel(self):
+        env = dict(self.VERCEL_ENV, DJANGO_ALLOWED_HOSTS="api.example.com")
+        with mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch.object(env_module, "SERVERLESS", True):
+                hosts = env_module._resolve_allowed_hosts()
+        self.assertEqual(hosts, ["api.example.com"])
+
+    def test_allowed_hosts_are_still_required_off_vercel(self):
+        with mock.patch.dict(os.environ, {"DJANGO_ALLOWED_HOSTS": ""}, clear=False):
+            with mock.patch.object(env_module, "DEBUG", False):
+                with mock.patch.object(env_module, "SERVERLESS", False):
+                    with self.assertRaises(ImproperlyConfigured):
+                        env_module._resolve_allowed_hosts()
+
+    def test_csrf_origins_derive_from_the_deployment_hosts(self):
+        with self._under_vercel():
+            with mock.patch.object(env_module, "DEBUG", False):
+                with mock.patch.object(env_module, "SERVERLESS", True):
+                    with mock.patch.object(
+                        env_module,
+                        "ALLOWED_HOSTS",
+                        ["myapi-abc123.vercel.app", ".vercel.app"],
+                    ):
+                        origins = env_module._resolve_csrf_trusted_origins()
+        self.assertIn("https://myapi-abc123.vercel.app", origins)
+        # A wildcard has no single origin, so it must not become a trusted one.
+        self.assertNotIn("https://.vercel.app", origins)
+
+    def test_database_url_is_used_when_discrete_variables_are_absent(self):
+        url = "postgresql://user:p%40ss@db.example.com:5432/shop?sslmode=require"
+        with mock.patch.dict(
+            os.environ, {"POSTGRES_URL": url, "DATABASE_URL": ""}, clear=False
+        ):
+            parts = env_module._parse_database_url(url)
+        self.assertEqual(parts["POSTGRES_DB"], "shop")
+        self.assertEqual(parts["POSTGRES_USER"], "user")
+        # The percent-encoded password must be decoded, not passed through raw.
+        self.assertEqual(parts["POSTGRES_PASSWORD"], "p@ss")
+        self.assertEqual(parts["POSTGRES_HOST"], "db.example.com")
+        self.assertEqual(parts["POSTGRES_PORT"], "5432")
+        self.assertEqual(parts["POSTGRES_SSLMODE"], "require")
+
+    def test_non_postgres_url_is_ignored(self):
+        self.assertIsNone(env_module._parse_database_url("mysql://u:p@h:3306/db"))
+
+    def test_discrete_variables_take_precedence_over_the_url(self):
+        url_parts = {"POSTGRES_HOST": "url-host"}
+        with mock.patch.dict(
+            os.environ, {"POSTGRES_HOST": ""}, clear=False
+        ):
+            with mock.patch.object(
+                env_module, "_DATABASE_URL_PARTS", url_parts
+            ):
+                # Unset in the environment, so the value comes from the URL.
+                self.assertEqual(
+                    env_module._postgres_setting("POSTGRES_HOST"), "url-host"
+                )
+        with mock.patch.dict(
+            os.environ, {"POSTGRES_HOST": "explicit-host"}, clear=False
+        ):
+            with mock.patch.object(
+                env_module, "_DATABASE_URL_PARTS", url_parts
+            ):
+                # Set in the environment, so the URL is ignored.
+                self.assertEqual(
+                    env_module._postgres_setting("POSTGRES_HOST"), "explicit-host"
+                )
+
+    def test_connections_are_not_reused_on_vercel(self):
+        with mock.patch.dict(
+            os.environ, {"POSTGRES_CONN_MAX_AGE": ""}, clear=False
+        ):
+            with mock.patch.object(env_module, "SERVERLESS", True):
+                self.assertEqual(env_module._resolve_conn_max_age(), 0)
+            # A long-lived process keeps the connection open.
+            with mock.patch.object(env_module, "SERVERLESS", False):
+                self.assertEqual(env_module._resolve_conn_max_age(), 60)
+
+    def test_conn_max_age_can_be_set_explicitly(self):
+        with mock.patch.dict(
+            os.environ, {"POSTGRES_CONN_MAX_AGE": "120"}, clear=False
+        ):
+            with mock.patch.object(env_module, "SERVERLESS", True):
+                self.assertEqual(env_module._resolve_conn_max_age(), 120)
+
+
 class SecuritySettingTests(SimpleTestCase):
     def test_cookies_are_http_only_and_lax(self):
         from django.conf import settings

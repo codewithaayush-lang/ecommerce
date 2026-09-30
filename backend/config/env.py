@@ -10,12 +10,17 @@ Rules:
     ALLOWED_HOSTS, or a missing database password raises ImproperlyConfigured.
   * In development those values fall back to safe local defaults so the project
     runs with no setup.
+  * On a serverless host (Vercel) only the *defaults* change: hostnames come
+    from the platform and database connections are not cached between
+    requests. Every validation above still applies, and an explicitly set
+    variable always wins.
 
 Nothing in this module reads a secret into a log or an exception message.
 """
 
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlparse
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -23,6 +28,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # The literal used as a local-development fallback. Refused in production.
 INSECURE_DEV_SECRET_KEY = "django-insecure-dev-only-do-not-use-in-production"
+
+
+def _detect_serverless():
+    """True when running on a PaaS that terminates TLS in front of us.
+
+    Vercel sets `VERCEL=1` in the build and function environments. Knowing this
+    lets the defaults below adapt (host names, connection reuse) without
+    weakening any validation: the strict checks still apply.
+    """
+    return os.environ.get("VERCEL", "") == "1" or bool(os.environ.get("VERCEL_URL"))
 
 
 def load_env_file(path):
@@ -74,6 +89,10 @@ load_env_file(BASE_DIR / ".env")
 # Developers set DJANGO_DEBUG=true in .env to opt in locally.
 DEBUG = get_bool("DJANGO_DEBUG", False)
 
+# True on a PaaS (currently Vercel) that supplies its own hostname and runs the
+# app as a function rather than a long-lived process.
+SERVERLESS = _detect_serverless()
+
 
 def _validate_secret_key(value):
     """Reject secret keys that would be unsafe in production."""
@@ -109,16 +128,54 @@ def _resolve_secret_key():
     return value or INSECURE_DEV_SECRET_KEY
 
 
+def _vercel_allowed_hosts():
+    """Host names Vercel serves this deployment on.
+
+    Vercel exposes the deployment URL in VERCEL_URL and the stable production
+    alias in VERCEL_PROJECT_PRODUCTION_URL. The bare `.vercel.app` suffix is
+    also allowed so preview deployments are not rejected: the hostname is
+    unpredictable per deploy and is not a secret, and Vercel only issues those
+    names to this project. An explicit DJANGO_ALLOWED_HOSTS still wins.
+    """
+    hosts = []
+    for name in ("VERCEL_URL", "VERCEL_PROJECT_PRODUCTION_URL"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            hosts.append(value)
+    hosts.append(".vercel.app")
+    return hosts
+
+
 def _resolve_allowed_hosts():
     hosts = get_list("DJANGO_ALLOWED_HOSTS")
     if hosts:
         return hosts
+    if SERVERLESS:
+        return _vercel_allowed_hosts()
     if DEBUG:
         return ["localhost", "127.0.0.1", "[::1]"]
     raise ImproperlyConfigured(
         "DJANGO_ALLOWED_HOSTS is empty. Set it to a comma-separated list of "
         "hostnames this service serves, e.g. 'api.example.com'."
     )
+
+
+def _resolve_csrf_trusted_origins_from_hosts():
+    """Derive trusted origins from the hosts this service answers for.
+
+    Only used when DJANGO_CSRF_TRUSTED_ORIGINS is not set explicitly. On
+    Vercel the deployment hostname is the only origin a browser would ever
+    present, so https://<that host> is the correct value.
+    """
+    if not SERVERLESS:
+        return []
+    origins = []
+    for host in ALLOWED_HOSTS:
+        if host.startswith("."):
+            # A wildcard suffix has no single origin to trust.
+            continue
+        origins.append(f"https://{host}")
+    return origins
 
 
 def _resolve_csrf_trusted_origins():
@@ -133,11 +190,50 @@ def _resolve_csrf_trusted_origins():
         return origins
     if DEBUG:
         return ["http://localhost:3000"]
-    return []
+    return _resolve_csrf_trusted_origins_from_hosts()
+
+
+def _resolve_database_url():
+    """Read a single-connection-string database URL, if the platform sets one.
+
+    Vercel's managed Postgres integrations (and most other providers) inject
+    `POSTGRES_URL` or `DATABASE_URL` instead of the discrete POSTGRES_*
+    variables this project already uses. Supporting it here means no new
+    dependency and no change to the existing variable names: the discrete
+    variables still take precedence, so a Render deployment is unaffected.
+    """
+    for name in ("POSTGRES_URL", "DATABASE_URL"):
+        raw = os.environ.get(name, "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def _parse_database_url(url):
+    """Split a postgres:// URL into its parts, or return None if unusable."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"postgres", "postgresql", "postgresql+psycopg"}:
+        return None
+    return {
+        "POSTGRES_DB": unquote(parsed.path.lstrip("/")),
+        "POSTGRES_USER": unquote(parsed.username or ""),
+        "POSTGRES_PASSWORD": unquote(parsed.password or ""),
+        "POSTGRES_HOST": parsed.hostname or "",
+        "POSTGRES_PORT": str(parsed.port or ""),
+        "POSTGRES_SSLMODE": dict(parse_qsl(parsed.query)).get("sslmode", ""),
+    }
+
+
+# Discrete POSTGRES_* variables win; the URL only fills in what they omit.
+_DATABASE_URL_PARTS = _parse_database_url(_resolve_database_url()) or {}
+
+
+def _postgres_setting(name, default=""):
+    return os.environ.get(name) or _DATABASE_URL_PARTS.get(name, default)
 
 
 def _resolve_database_password():
-    password = os.environ.get("POSTGRES_PASSWORD", "")
+    password = _postgres_setting("POSTGRES_PASSWORD")
     if not password and not DEBUG:
         raise ImproperlyConfigured(
             "POSTGRES_PASSWORD is not set. The database password must be "
@@ -182,13 +278,26 @@ LOG_FORMAT = os.environ.get(
 )
 
 # Postgres connection.
-POSTGRES_DB = os.environ.get("POSTGRES_DB", "ecommerce")
-POSTGRES_USER = os.environ.get("POSTGRES_USER", "ecommerce")
-POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
-# Managed PostgreSQL (Render, RDS, ...) requires TLS. Unset locally, where the
-# connection is over the loopback interface.
-POSTGRES_SSLMODE = os.environ.get("POSTGRES_SSLMODE", "").strip()
+POSTGRES_DB = _postgres_setting("POSTGRES_DB", "ecommerce")
+POSTGRES_USER = _postgres_setting("POSTGRES_USER", "ecommerce")
+POSTGRES_HOST = _postgres_setting("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = _postgres_setting("POSTGRES_PORT", "5432")
+# Managed PostgreSQL (Render, Neon, RDS, ...) requires TLS. Unset locally, where
+# the connection is over the loopback interface.
+POSTGRES_SSLMODE = _postgres_setting("POSTGRES_SSLMODE").strip()
+
+def _resolve_conn_max_age():
+    """Seconds a database connection is reused.
+
+    A long-lived process (gunicorn on Render) benefits from keeping connections
+    open. A serverless function is frozen between requests, so a cached
+    connection can go stale or be dropped by the provider's connection limit;
+    there, closing after each request is the correct behaviour.
+    """
+    return get_int("POSTGRES_CONN_MAX_AGE", 0 if SERVERLESS else 60)
+
+
+POSTGRES_CONN_MAX_AGE = _resolve_conn_max_age()
 
 # Set by the tests so they can mark themselves explicitly.
 TESTING = get_bool("DJANGO_TESTING", False)

@@ -5,6 +5,10 @@ All configuration is read from the environment and validated at start-up by
 `config.env`. A misconfigured deployment raises ImproperlyConfigured and
 refuses to boot rather than running insecurely.
 
+`config.env` adapts a few defaults when it detects a serverless host such as
+Vercel (deployment hostnames, no connection reuse). The same settings work
+unchanged on a long-lived host like Render.
+
 See `.env.example` for the supported variables.
 """
 
@@ -16,6 +20,7 @@ from config.env import (  # noqa: F401  (re-exported for Django/DRF settings)
     DEBUG,
     LOG_FORMAT,
     LOG_LEVEL,
+    POSTGRES_CONN_MAX_AGE,
     POSTGRES_DB,
     POSTGRES_HOST,
     POSTGRES_PASSWORD,
@@ -89,7 +94,12 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
+# ASGI_APPLICATION is intentionally not set. This project is entirely
+# synchronous, and a host that auto-detects an entrypoint (Vercel does) prefers
+# ASGI whenever it is defined, which would silently run the app under a
+# different server than the one used elsewhere. Declaring WSGI only keeps a
+# single, well-defined deployment target.
+# ASGI_APPLICATION = "config.asgi.application"
 
 
 # Database
@@ -106,7 +116,7 @@ DATABASES = {
         "HOST": POSTGRES_HOST,
         "PORT": POSTGRES_PORT,
         # Fail fast if PostgreSQL is unreachable instead of hanging a request.
-        "CONN_MAX_AGE": 60,
+        "CONN_MAX_AGE": POSTGRES_CONN_MAX_AGE,
         "OPTIONS": {
             "connect_timeout": 5,
             # TLS to a managed database; omitted when the variable is unset.
